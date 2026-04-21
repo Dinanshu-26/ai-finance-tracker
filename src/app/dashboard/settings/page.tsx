@@ -78,7 +78,7 @@ export default function SettingsPage() {
               <Label htmlFor="base-currency">Display all totals in:</Label>
               <Select 
                 value={baseCurrency} 
-                onValueChange={setBaseCurrency}
+                onValueChange={(val) => val && setBaseCurrency(val)}
                 disabled={loading}
               >
                 <SelectTrigger id="base-currency" className="bg-black/40 border-white/10 h-12 focus:border-primary/50">
