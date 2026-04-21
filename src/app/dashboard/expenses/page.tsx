@@ -21,11 +21,14 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ALL_CATEGORIES } from "@/lib/ai/categorize";
+import { getExchangeRates } from "@/lib/currency";
+import { formatCurrency } from "@/lib/utils";
 import Link from "next/link";
 
 interface Expense {
   id: string;
   amount: number;
+  currency: string;
   description: string;
   category: string;
   date: string;
@@ -46,14 +49,6 @@ const categoryColors: Record<string, string> = {
   Other: "bg-gray-500/15 text-gray-400 border-gray-500/20",
 };
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-IN", {
     day: "numeric",
@@ -71,13 +66,28 @@ export default function ExpensesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [baseCurrency, setBaseCurrency] = useState("USD");
+  const [rates, setRates] = useState<Record<string, number>>({});
+
   const fetchExpenses = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("expenses")
-      .select("*")
-      .order("date", { ascending: false });
-    setExpenses(data || []);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const [expensesRes, profileRes] = await Promise.all([
+      supabase.from("expenses").select("*").order("date", { ascending: false }),
+      supabase.from("profiles").select("preferred_currency").eq("id", user.id).single()
+    ]);
+
+    setExpenses(expensesRes.data || []);
+    
+    const prefCurrency = profileRes.data?.preferred_currency || "USD";
+    setBaseCurrency(prefCurrency);
+
+    // Fetch live rates using centralized utility with fallbacks
+    const ratesData = await getExchangeRates(prefCurrency);
+    setRates(ratesData);
+
     setLoading(false);
   }, [supabase]);
 
@@ -104,7 +114,11 @@ export default function ExpensesPage() {
     return matchSearch && matchCat;
   });
 
-  const totalFiltered = filtered.reduce((s, e) => s + Number(e.amount), 0);
+  const totalFiltered = filtered.reduce((sum, e) => {
+    const rate = rates[e.currency] || 1;
+    const amountInBase = Number(e.amount) / rate;
+    return sum + amountInBase;
+  }, 0);
 
   return (
     <div className="space-y-6">
@@ -155,7 +169,7 @@ export default function ExpensesPage() {
             Showing {filtered.length} expense{filtered.length !== 1 ? "s" : ""}
           </span>
           <span className="font-semibold text-primary">
-            Total: {formatCurrency(totalFiltered)}
+            Total: {formatCurrency(totalFiltered, baseCurrency)} <span className="text-[10px] font-normal text-muted-foreground">({baseCurrency} converted)</span>
           </span>
         </div>
       )}
@@ -211,7 +225,7 @@ export default function ExpensesPage() {
                   {expense.category}
                 </Badge>
                 <p className="font-bold text-sm text-primary shrink-0">
-                  {formatCurrency(Number(expense.amount))}
+                  {formatCurrency(Number(expense.amount), expense.currency || "INR")}
                 </p>
                 <Button
                   variant="ghost"

@@ -4,11 +4,14 @@ export interface Expense {
   id: string;
   user_id: string;
   amount: number;
+  currency: string;
   description: string;
   category: string;
   date: string;
   created_at: string;
 }
+
+import { convertCurrency, type ExchangeRates } from "../currency";
 
 export interface CategoryBreakdown {
   category: string;
@@ -37,22 +40,35 @@ export interface SpendingInsights {
 /**
  * Generates spending insights from a list of expenses.
  * Produces category breakdowns, monthly trends, and AI-generated tips.
- *
- * @future Replace `generateAITips` with a real LLM call to produce personalized insights.
  */
-export function generateInsights(expenses: Expense[]): SpendingInsights {
+export function generateInsights(
+  expenses: Expense[], 
+  rates: ExchangeRates, 
+  baseCurrency: string = "USD"
+): SpendingInsights {
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthKey = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}`;
 
-  const totalSpent = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalSpent = expenses.reduce(
+    (sum, e) => sum + convertCurrency(Number(e.amount), e.currency || "USD", baseCurrency, rates), 
+    0
+  );
+
   const thisMonth = expenses
     .filter((e) => e.date.startsWith(thisMonthKey))
-    .reduce((sum, e) => sum + Number(e.amount), 0);
+    .reduce(
+      (sum, e) => sum + convertCurrency(Number(e.amount), e.currency || "USD", baseCurrency, rates), 
+      0
+    );
+
   const lastMonth = expenses
     .filter((e) => e.date.startsWith(lastMonthKey))
-    .reduce((sum, e) => sum + Number(e.amount), 0);
+    .reduce(
+      (sum, e) => sum + convertCurrency(Number(e.amount), e.currency || "USD", baseCurrency, rates), 
+      0
+    );
 
   const monthOverMonthChange =
     lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100 : 0;
@@ -62,7 +78,7 @@ export function generateInsights(expenses: Expense[]): SpendingInsights {
   for (const expense of expenses) {
     const cat = expense.category || "Other";
     if (!categoryMap[cat]) categoryMap[cat] = { total: 0, count: 0 };
-    categoryMap[cat].total += Number(expense.amount);
+    categoryMap[cat].total += convertCurrency(Number(expense.amount), expense.currency || "USD", baseCurrency, rates);
     categoryMap[cat].count += 1;
   }
 
@@ -88,7 +104,7 @@ export function generateInsights(expenses: Expense[]): SpendingInsights {
   for (const expense of expenses) {
     const monthKey = expense.date.substring(0, 7);
     if (monthKey in monthlyMap) {
-      monthlyMap[monthKey] += Number(expense.amount);
+      monthlyMap[monthKey] += convertCurrency(Number(expense.amount), expense.currency || "USD", baseCurrency, rates);
     }
   }
 
@@ -105,7 +121,8 @@ export function generateInsights(expenses: Expense[]): SpendingInsights {
   const aiTips = generateAITips(
     categoryBreakdown,
     monthOverMonthChange,
-    thisMonth
+    thisMonth,
+    baseCurrency
   );
 
   return {
@@ -122,12 +139,12 @@ export function generateInsights(expenses: Expense[]): SpendingInsights {
 
 /**
  * Mock AI tip generator based on spending patterns.
- * @future Replace with a real LLM prompt for personalized financial advice.
  */
 function generateAITips(
   breakdown: CategoryBreakdown[],
   momChange: number,
-  thisMonth: number
+  thisMonth: number,
+  baseCurrency: string
 ): string[] {
   const tips: string[] = [];
 
@@ -154,9 +171,10 @@ function generateAITips(
     );
   }
 
-  if (thisMonth > 50000) {
+  const limitThreshold = baseCurrency === "INR" ? 50000 : 1000;
+  if (thisMonth > limitThreshold) {
     tips.push(
-      `💰 You've spent ₹${thisMonth.toLocaleString("en-IN")} this month. Setting a monthly budget can help stay on track.`
+      `💰 High spending alert: You've spent more than ${baseCurrency} ${thisMonth.toLocaleString()} this month.`
     );
   }
 

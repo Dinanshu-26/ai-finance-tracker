@@ -8,14 +8,23 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 
+import { getExchangeRates } from "@/lib/currency";
+
 export default async function InsightsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: expenses } = await supabase.from("expenses").select("*").order("date", { ascending: false });
-  const allExpenses: Expense[] = expenses || [];
-  const insights = generateInsights(allExpenses);
+  const [expensesRes, profileRes] = await Promise.all([
+    supabase.from("expenses").select("*").order("date", { ascending: false }),
+    supabase.from("profiles").select("preferred_currency").eq("id", user.id).single()
+  ]);
+
+  const allExpenses: Expense[] = expensesRes.data || [];
+  const baseCurrency = profileRes.data?.preferred_currency || "USD";
+  const rates = await getExchangeRates(baseCurrency);
+  
+  const insights = generateInsights(allExpenses, rates, baseCurrency);
 
   if (allExpenses.length === 0) {
     return (
@@ -58,8 +67,8 @@ export default async function InsightsPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: "This Month", value: formatCurrency(insights.thisMonth), color: "text-primary" },
-          { label: "Last Month", value: formatCurrency(insights.lastMonth), color: "" },
+          { label: "This Month", value: formatCurrency(insights.thisMonth, baseCurrency), color: "text-primary" },
+          { label: "Last Month", value: formatCurrency(insights.lastMonth, baseCurrency), color: "" },
           {
             label: "MoM Change",
             value: `${insights.monthOverMonthChange > 0 ? "+" : ""}${insights.monthOverMonthChange.toFixed(1)}%`,
@@ -96,7 +105,7 @@ export default async function InsightsPage() {
                     <span>{cat.category}</span>
                     <span className="text-muted-foreground text-xs">({cat.count} {cat.count === 1 ? "expense" : "expenses"})</span>
                   </div>
-                  <span className="font-semibold">{formatCurrency(cat.total)}</span>
+                  <span className="font-semibold">{formatCurrency(cat.total, baseCurrency)}</span>
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div className="h-full rounded-full transition-all duration-700" style={{ width: `${cat.percentage}%`, backgroundColor: cat.color }} />

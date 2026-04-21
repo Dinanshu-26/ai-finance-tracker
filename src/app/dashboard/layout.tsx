@@ -9,10 +9,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 
 const navItems = [
-  { href: "/dashboard", label: "Overview", icon: "🏠" },
-  { href: "/dashboard/add", label: "Add Expense", icon: "➕" },
-  { href: "/dashboard/expenses", label: "All Expenses", icon: "📋" },
+  { href: "/dashboard", label: "Dashboard", icon: "📊" },
+  { href: "/dashboard/expenses", label: "Expenses", icon: "💵" },
+  { href: "/dashboard/budget", label: "Budget", icon: "🖥️" },
   { href: "/dashboard/insights", label: "AI Insights", icon: "🤖" },
+  { href: "/dashboard/settings", label: "Settings", icon: "⚙️" },
 ];
 
 export default function DashboardLayout({
@@ -35,10 +36,10 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside className="hidden md:flex w-64 flex-col border-r border-border/40 bg-[oklch(0.12_0.015_265)] shrink-0">
         {/* Logo */}
-        <div className="flex items-center gap-2.5 px-6 py-5 border-b border-border/40">
+        <Link href="/" className="flex items-center gap-2.5 px-6 py-5 border-b border-border/40 hover:opacity-80 transition-opacity">
           <span className="text-2xl">💰</span>
           <span className="font-bold text-lg tracking-tight">FinanceAI</span>
-        </div>
+        </Link>
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -91,10 +92,10 @@ export default function DashboardLayout({
 
       {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 bg-[oklch(0.12_0.015_265)] border-b border-border/40">
-        <div className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <span className="text-xl">💰</span>
           <span className="font-bold tracking-tight">FinanceAI</span>
-        </div>
+        </Link>
         <div className="flex items-center gap-1">
           {navItems.map((item) => (
             <Link

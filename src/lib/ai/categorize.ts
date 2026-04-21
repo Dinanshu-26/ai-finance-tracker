@@ -7,6 +7,8 @@
  * of `categorizeExpense` without changing its signature or usage in the app.
  */
 
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
 export type ExpenseCategory =
   | "Food & Dining"
   | "Transport"
@@ -74,18 +76,50 @@ const CATEGORY_KEYWORDS: Record<ExpenseCategory, string[]> = {
   Other: [],
 };
 
+let genAIInstance: GoogleGenerativeAI | null = null;
+
+function getGenAI() {
+  const key = process.env.GEMINI_API_KEY?.trim();
+  if (!key || key === "your_gemini_api_key_here") return null;
+  if (!genAIInstance) {
+    genAIInstance = new GoogleGenerativeAI(key);
+  }
+  return genAIInstance;
+}
+
 /**
- * Categorizes an expense description using mock keyword matching.
- *
- * @param description - The expense description entered by the user
- * @returns The matched category string
- *
- * @future To integrate Google Gemini or another LLM, replace this function body
- * with an API call. The signature and return type remain the same.
+ * Categorizes an expense description using Google Gemini AI,
+ * with a fallback to keyword-based matching.
  */
 export async function categorizeExpense(
   description: string
 ): Promise<ExpenseCategory> {
+  const genAI = getGenAI();
+
+  // 1. Try Gemini AI if API key is present
+  if (genAI) {
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const categories = Object.keys(CATEGORY_KEYWORDS).join(", ");
+      const prompt = `Categorize the following expense description into exactly one of these categories: [${categories}]. 
+      Description: "${description}"
+      Return only the category name, nothing else. If you are unsure, return "Other".`;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+
+      if (Object.keys(CATEGORY_KEYWORDS).includes(text)) {
+        return text as ExpenseCategory;
+      }
+    } catch (error: any) {
+      console.error("Gemini Categorization Failed, falling back to keywords:", error);
+    }
+
+  }
+
+
+  // 2. Fallback to Keyword matching
   const normalized = description.toLowerCase().trim();
 
   for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
@@ -97,6 +131,7 @@ export async function categorizeExpense(
 
   return "Other";
 }
+
 
 export const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   "Food & Dining": "#f97316",

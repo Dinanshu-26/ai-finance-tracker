@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { categorizeExpense, ALL_CATEGORIES } from "@/lib/ai/categorize";
+import { ALL_CATEGORIES } from "@/lib/ai/categorize";
+import { getAICategory } from "@/app/actions/ai-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,25 +26,74 @@ export default function AddExpensePage() {
 
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("INR");
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState<string>("");
   const [aiCategory, setAiCategory] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [recentCount, setRecentCount] = useState(0);
+  const [checkingLimit, setCheckingLimit] = useState(true);
+
+  const FREE_LIMIT = 3;
+
+  useEffect(() => {
+    async function checkLimit() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("is_pro")
+        .eq("id", user.id)
+        .single();
+      
+      setIsPro(profile?.is_pro || false);
+
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabase
+        .from("expenses")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", twentyFourHoursAgo);
+      
+      setRecentCount(count || 0);
+      setCheckingLimit(false);
+    }
+    checkLimit();
+  }, [supabase]);
+
+  const hasReachedLimit = !isPro && recentCount >= FREE_LIMIT;
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const currencies = [
+    { code: "INR", symbol: "₹" },
+    { code: "USD", symbol: "$" },
+    { code: "EUR", symbol: "€" },
+    { code: "GBP", symbol: "£" },
+  ];
+
   async function handleDescriptionBlur() {
-    if (!description.trim()) return;
+    if (!description.trim() || description.length < 3) return;
     setAiLoading(true);
-    const cat = await categorizeExpense(description);
-    setAiCategory(cat);
-    if (!category) setCategory(cat);
-    setAiLoading(false);
+    try {
+      const cat = await getAICategory(description);
+      if (cat) {
+        setAiCategory(cat);
+        if (!category) setCategory(cat);
+      }
+    } catch (err) {
+      console.error("AI Error:", err);
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (hasReachedLimit) return;
     setError(null);
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
       setError("Please enter a valid amount.");
@@ -59,12 +109,13 @@ export default function AddExpensePage() {
       return;
     }
 
-    const finalCategory = category || (await categorizeExpense(description));
+    const finalCategory = category || aiCategory || (await getAICategory(description)) || "Other";
 
     const { error: insertError } = await supabase.from("expenses").insert({
       user_id: user.id,
       description: description.trim(),
       amount: parseFloat(amount),
+      currency: currency,
       category: finalCategory,
       date,
     });
@@ -78,6 +129,7 @@ export default function AddExpensePage() {
         setSuccess(false);
         setDescription("");
         setAmount("");
+        setCurrency("INR");
         setDate(today);
         setCategory("");
         setAiCategory(null);
@@ -107,6 +159,16 @@ export default function AddExpensePage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
+            {hasReachedLimit && (
+              <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-center gap-3 animate-in fade-in zoom-in duration-300">
+                <div className="w-8 h-8 rounded-full bg-destructive/20 flex items-center justify-center shrink-0">
+                  ⚠️
+                </div>
+                <p>
+                  <strong>Daily limit reached!</strong> You can log up to {FREE_LIMIT} expenses per day on the free plan. Upgrade to Pro for unlimited access.
+                </p>
+              </div>
+            )}
             {/* Description */}
             <div className="space-y-2">
               <Label htmlFor="description">Description *</Label>
@@ -145,21 +207,41 @@ export default function AddExpensePage() {
               )}
             </div>
 
-            {/* Amount and Date */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="amount">Amount (₹) *</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="bg-secondary/50 border-border/50 focus:border-primary h-11"
-                />
+            {/* Amount, Currency and Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2 flex gap-2">
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="amount">Amount *</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      {currencies.find(c => c.code === currency)?.symbol}
+                    </span>
+                    <Input
+                      id="amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      required
+                      className="bg-secondary/50 border-border/50 focus:border-primary h-11 pl-8"
+                    />
+                  </div>
+                </div>
+                <div className="w-24 space-y-2">
+                  <Label htmlFor="currency">Currency</Label>
+                  <Select value={currency} onValueChange={(val) => setCurrency(val as string)}>
+                    <SelectTrigger className="bg-secondary/50 border-border/50 h-11">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map(c => (
+                        <SelectItem key={c.code} value={c.code}>{c.code}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="date">Date *</Label>
@@ -218,8 +300,12 @@ export default function AddExpensePage() {
             <div className="flex gap-3 pt-2">
               <Button
                 type="submit"
-                disabled={loading || success}
-                className="flex-1 gradient-primary text-white font-semibold h-11 hover:opacity-90 transition-all hover:scale-[1.02] active:scale-100 disabled:opacity-60"
+                disabled={loading || success || checkingLimit || hasReachedLimit}
+                className={`flex-1 font-semibold h-11 transition-all ${
+                  hasReachedLimit 
+                    ? "bg-secondary text-muted-foreground cursor-not-allowed opacity-80" 
+                    : "gradient-primary text-white hover:opacity-90 hover:scale-[1.02] active:scale-100 shadow-lg shadow-indigo-500/10"
+                }`}
               >
                 {loading ? (
                   <span className="flex items-center gap-2">
@@ -231,6 +317,10 @@ export default function AddExpensePage() {
                   </span>
                 ) : success ? (
                   "✅ Saved!"
+                ) : hasReachedLimit ? (
+                  <span className="flex items-center gap-2 justify-center">
+                    🔒 Limit Reached
+                  </span>
                 ) : (
                   "Log Expense"
                 )}
